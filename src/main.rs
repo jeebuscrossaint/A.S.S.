@@ -3,6 +3,8 @@ use std::io::{self, Write};
 use std::time::Duration;
 use std::thread;
 use std::env;
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 
 struct Config {
     dry_run: bool,
@@ -279,7 +281,7 @@ fn setup_dotfiles(config: &Config) {
     let pkglist_path = format!("{}/archpkglist.txt", dotfiles_path);
     
     let status = Command::new("paru")
-        .args(&["-S", "--needed", "--noconfirm", "-"])
+        .args(&["-S", "--needed", "--noconfirm", "--skipreview", "-"])
         .current_dir(&dotfiles_path)
         .stdin(std::fs::File::open(&pkglist_path).expect("Failed to open archpkglist.txt"))
         .status()
@@ -597,6 +599,118 @@ fn rebuild_home_manager(config: &Config) {
     println!("✓ Home Manager configuration rebuilt successfully!");
 }
 
+// Setup Chaotic AUR repository
+fn setup_chaotic_aur(config: &Config) {
+    println!("Setting up Chaotic AUR...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. sudo pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com");
+        println!("  2. sudo pacman-key --lsign-key 3056513887B78AEB");
+        println!("  3. sudo pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst'");
+        println!("  4. sudo pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'");
+        println!("  5. Append chaotic-aur config to /etc/pacman.conf");
+        println!("  6. sudo pacman -Syu --noconfirm");
+        return;
+    }
+    
+    // Receive GPG key
+    if config.verbose {
+        println!("Receiving Chaotic AUR GPG key...");
+    }
+    let status = Command::new("sudo")
+        .args(&["pacman-key", "--recv-key", "3056513887B78AEB", "--keyserver", "keyserver.ubuntu.com"])
+        .status()
+        .expect("Failed to execute pacman-key recv");
+    
+    if !status.success() {
+        eprintln!("Failed to receive Chaotic AUR GPG key");
+        std::process::exit(1);
+    }
+    
+    // Locally sign the key
+    if config.verbose {
+        println!("Signing Chaotic AUR GPG key...");
+    }
+    let status = Command::new("sudo")
+        .args(&["pacman-key", "--lsign-key", "3056513887B78AEB"])
+        .status()
+        .expect("Failed to execute pacman-key lsign");
+    
+    if !status.success() {
+        eprintln!("Failed to sign Chaotic AUR GPG key");
+        std::process::exit(1);
+    }
+    
+    // Install chaotic-keyring
+    if config.verbose {
+        println!("Installing chaotic-keyring...");
+    }
+    let status = Command::new("sudo")
+        .args(&["pacman", "-U", "--noconfirm", "https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst"])
+        .status()
+        .expect("Failed to execute pacman");
+    
+    if !status.success() {
+        eprintln!("Failed to install chaotic-keyring");
+        std::process::exit(1);
+    }
+    
+    // Install chaotic-mirrorlist
+    if config.verbose {
+        println!("Installing chaotic-mirrorlist...");
+    }
+    let status = Command::new("sudo")
+        .args(&["pacman", "-U", "--noconfirm", "https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst"])
+        .status()
+        .expect("Failed to execute pacman");
+    
+    if !status.success() {
+        eprintln!("Failed to install chaotic-mirrorlist");
+        std::process::exit(1);
+    }
+    
+    // Append to /etc/pacman.conf
+    if config.verbose {
+        println!("Adding Chaotic AUR to pacman.conf...");
+    }
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open("/tmp/chaotic-aur.conf")
+        .expect("Failed to create temp file");
+    
+    writeln!(file, "\n[chaotic-aur]").expect("Failed to write");
+    writeln!(file, "Include = /etc/pacman.d/chaotic-mirrorlist").expect("Failed to write");
+    
+    let status = Command::new("sudo")
+        .args(&["tee", "-a", "/etc/pacman.conf"])
+        .stdin(std::fs::File::open("/tmp/chaotic-aur.conf").expect("Failed to open temp file"))
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("Failed to append to pacman.conf");
+    
+    if !status.success() {
+        eprintln!("Failed to update pacman.conf");
+        std::process::exit(1);
+    }
+    
+    // Update system
+    if config.verbose {
+        println!("Updating system with Chaotic AUR...");
+    }
+    let status = Command::new("sudo")
+        .args(&["pacman", "-Syu", "--noconfirm"])
+        .status()
+        .expect("Failed to execute pacman");
+    
+    if !status.success() {
+        eprintln!("Failed to update system");
+        std::process::exit(1);
+    }
+    
+    println!("✓ Chaotic AUR setup complete!");
+}
+
 fn main() {
     let config = parse_args();
     
@@ -608,6 +722,7 @@ fn main() {
     println!("A.S.S. - Arch Setup Script");
     check_deps(&config);
     install_paru(&config);
+    setup_chaotic_aur(&config);
     setup_dotfiles(&config);
     deploy_dotfiles(&config);
     install_nix(&config);
