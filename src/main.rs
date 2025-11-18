@@ -5,6 +5,7 @@ use std::thread;
 use std::env;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
+use std::path::Path;
 
 struct Config {
     dry_run: bool,
@@ -262,29 +263,40 @@ fn setup_dotfiles(config: &Config) {
     
     if config.dry_run {
         println!("[DRY RUN] Would execute:");
-        println!("  1. cd ~");
-        println!("  2. git clone --depth=1 https://github.com/jeebuscrossaint/dotfiles.git");
-        println!("  3. cd dotfiles");
-        println!("  4. paru -S --needed --noconfirm - < archpkglist.txt");
+        println!("  1. Check if ~/dotfiles exists");
+        println!("  2. cd ~");
+        println!("  3. git clone --depth=1 https://github.com/jeebuscrossaint/dotfiles.git");
+        println!("  4. cd dotfiles");
+        println!("  5. paru -S --needed --noconfirm --skipreview - < archpkglist.txt");
         return;
     }
     
     // Get home directory
     let home = env::var("HOME").expect("HOME environment variable not set");
+    let dotfiles_path = format!("{}/dotfiles", home);
     
-    // Clone dotfiles repo with --depth=1
-    if config.verbose {
-        println!("Cloning dotfiles repository to {} (shallow clone)...", home);
-    }
-    let status = Command::new("git")
-        .args(&["clone", "--depth=1", "https://github.com/jeebuscrossaint/dotfiles.git"])
-        .current_dir(&home)
-        .status()
-        .expect("Failed to execute git clone");
-    
-    if !status.success() {
-        eprintln!("Failed to clone dotfiles repository");
-        std::process::exit(1);
+    // Check if dotfiles already exists
+    if Path::new(&dotfiles_path).exists() {
+        if config.verbose {
+            println!("✓ Dotfiles directory already exists at {}", dotfiles_path);
+        } else {
+            println!("✓ Dotfiles already cloned, skipping clone");
+        }
+    } else {
+        // Clone dotfiles repo with --depth=1
+        if config.verbose {
+            println!("Cloning dotfiles repository to {} (shallow clone)...", home);
+        }
+        let status = Command::new("git")
+            .args(&["clone", "--depth=1", "https://github.com/jeebuscrossaint/dotfiles.git"])
+            .current_dir(&home)
+            .status()
+            .expect("Failed to execute git clone");
+        
+        if !status.success() {
+            eprintln!("Failed to clone dotfiles repository");
+            std::process::exit(1);
+        }
     }
     
     // Install packages from archpkglist.txt
@@ -292,7 +304,6 @@ fn setup_dotfiles(config: &Config) {
         println!("Installing packages from archpkglist.txt...");
     }
     
-    let dotfiles_path = format!("{}/dotfiles", home);
     let pkglist_path = format!("{}/archpkglist.txt", dotfiles_path);
     
     let status = Command::new("paru")
@@ -394,10 +405,26 @@ fn install_nix(config: &Config) {
     
     if config.dry_run {
         println!("[DRY RUN] Would execute:");
-        println!("  1. cd ~");
-        println!("  2. curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install -o nix-install.sh");
-        println!("  3. chmod +x nix-install.sh");
-        println!("  4. sh ./nix-install.sh --daemon");
+        println!("  1. Check if nix is already installed");
+        println!("  2. cd ~");
+        println!("  3. curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install -o nix-install.sh");
+        println!("  4. chmod +x nix-install.sh");
+        println!("  5. sh ./nix-install.sh --daemon");
+        return;
+    }
+    
+    // Check if nix is already installed
+    let output = Command::new("which")
+        .arg("nix")
+        .output()
+        .expect("Failed to execute which command");
+    
+    if !output.stdout.is_empty() {
+        if config.verbose {
+            println!("✓ Nix is already installed: {}", String::from_utf8_lossy(&output.stdout).trim());
+        } else {
+            println!("✓ Nix already installed, skipping installation");
+        }
         return;
     }
     
@@ -566,6 +593,18 @@ fn clone_wallpapers(config: &Config) {
     let home = env::var("HOME").expect("HOME environment variable not set");
     
     for repo in &wallpaper_repos {
+        // Extract repo name from URL
+        let repo_name = repo.split('/').last().unwrap_or("");
+        let repo_path = format!("{}/{}", home, repo_name);
+        
+        // Check if repo already exists
+        if Path::new(&repo_path).exists() {
+            if config.verbose {
+                println!("✓ {} already exists, skipping", repo_name);
+            }
+            continue;
+        }
+        
         if config.verbose {
             println!("Cloning {}...", repo);
         }
@@ -620,12 +659,26 @@ fn setup_chaotic_aur(config: &Config) {
     
     if config.dry_run {
         println!("[DRY RUN] Would execute:");
-        println!("  1. sudo pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com");
-        println!("  2. sudo pacman-key --lsign-key 3056513887B78AEB");
-        println!("  3. sudo pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst'");
-        println!("  4. sudo pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'");
-        println!("  5. Append chaotic-aur config to /etc/pacman.conf");
-        println!("  6. sudo pacman -Syu --noconfirm");
+        println!("  1. Check if Chaotic AUR is already configured");
+        println!("  2. sudo pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com");
+        println!("  3. sudo pacman-key --lsign-key 3056513887B78AEB");
+        println!("  4. sudo pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst'");
+        println!("  5. sudo pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'");
+        println!("  6. Append chaotic-aur config to /etc/pacman.conf");
+        println!("  7. sudo pacman -Syu --noconfirm");
+        return;
+    }
+    
+    // Check if Chaotic AUR is already configured
+    let pacman_conf = std::fs::read_to_string("/etc/pacman.conf")
+        .unwrap_or_default();
+    
+    if pacman_conf.contains("[chaotic-aur]") {
+        if config.verbose {
+            println!("✓ Chaotic AUR already configured");
+        } else {
+            println!("✓ Chaotic AUR already configured, skipping setup");
+        }
         return;
     }
     
@@ -689,8 +742,14 @@ fn setup_chaotic_aur(config: &Config) {
     if config.verbose {
         println!("Adding Chaotic AUR to pacman.conf...");
     }
+    
+    // Remove temp file if it exists
+    let _ = std::fs::remove_file("/tmp/chaotic-aur.conf");
+    
     let mut file = OpenOptions::new()
-        .append(true)
+        .create(true)
+        .write(true)
+        .truncate(true)
         .open("/tmp/chaotic-aur.conf")
         .expect("Failed to create temp file");
     
@@ -708,6 +767,9 @@ fn setup_chaotic_aur(config: &Config) {
         eprintln!("Failed to update pacman.conf");
         std::process::exit(1);
     }
+    
+    // Clean up temp file
+    let _ = std::fs::remove_file("/tmp/chaotic-aur.conf");
     
     // Update system
     if config.verbose {
