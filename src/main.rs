@@ -267,7 +267,7 @@ fn setup_dotfiles(config: &Config) {
         println!("  2. cd ~");
         println!("  3. git clone --depth=1 https://github.com/jeebuscrossaint/dotfiles.git");
         println!("  4. cd dotfiles");
-        println!("  5. paru -S --needed --noconfirm --skipreview - < archpkglist.txt");
+        println!("  5. paru -S --needed --noconfirm --skipreview --batchinstall - < archpkglist.txt");
         return;
     }
     
@@ -307,7 +307,7 @@ fn setup_dotfiles(config: &Config) {
     let pkglist_path = format!("{}/archpkglist.txt", dotfiles_path);
     
     let status = Command::new("paru")
-        .args(&["-S", "--needed", "--noconfirm", "--skipreview", "-"])
+        .args(&["-S", "--needed", "--noconfirm", "--skipreview", "--batchinstall", "-"])
         .current_dir(&dotfiles_path)
         .stdin(std::fs::File::open(&pkglist_path).expect("Failed to open archpkglist.txt"))
         .status()
