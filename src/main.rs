@@ -352,8 +352,6 @@ fn deploy_dotfiles(config: &Config) {
         println!("[DRY RUN] Would execute:");
         println!("  1. sudo pacman -S --noconfirm stow");
         println!("  2. mkdir -p ~/.config");
-        println!("  3. cd ~/dotfiles && stow home-manager");
-        println!("  4. cd ~/dotfiles && stow nix");
         return;
     }
     
@@ -373,7 +371,6 @@ fn deploy_dotfiles(config: &Config) {
     
     let home = env::var("HOME").expect("HOME environment variable not set");
     let config_path = format!("{}/.config", home);
-    let dotfiles_path = format!("{}/dotfiles", home);
     
     // Create .config directory
     if config.verbose {
@@ -387,6 +384,59 @@ fn deploy_dotfiles(config: &Config) {
     if !status.success() {
         eprintln!("Failed to create .config directory");
         std::process::exit(1);
+    }
+    
+    println!("✓ Stow installed and directories prepared!");
+}
+
+// Stow custom configs after initial home-manager generation
+fn stow_custom_configs(config: &Config) {
+    println!("Deploying custom dotfiles with GNU Stow...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. Remove default ~/.config/home-manager");
+        println!("  2. Remove default ~/.config/nix");
+        println!("  3. cd ~/dotfiles && stow home-manager");
+        println!("  4. cd ~/dotfiles && stow nix");
+        return;
+    }
+    
+    let home = env::var("HOME").expect("HOME environment variable not set");
+    let dotfiles_path = format!("{}/dotfiles", home);
+    let hm_config_path = format!("{}/.config/home-manager", home);
+    let nix_config_path = format!("{}/.config/nix", home);
+    
+    // Remove default home-manager config
+    if Path::new(&hm_config_path).exists() {
+        if config.verbose {
+            println!("Removing default home-manager config...");
+        }
+        let status = Command::new("rm")
+            .args(&["-rf", &hm_config_path])
+            .status()
+            .expect("Failed to remove home-manager config");
+        
+        if !status.success() {
+            eprintln!("Failed to remove default home-manager config");
+            std::process::exit(1);
+        }
+    }
+    
+    // Remove default nix config
+    if Path::new(&nix_config_path).exists() {
+        if config.verbose {
+            println!("Removing default nix config...");
+        }
+        let status = Command::new("rm")
+            .args(&["-rf", &nix_config_path])
+            .status()
+            .expect("Failed to remove nix config");
+        
+        if !status.success() {
+            eprintln!("Failed to remove default nix config");
+            std::process::exit(1);
+        }
     }
     
     // Stow home-manager
@@ -419,7 +469,7 @@ fn deploy_dotfiles(config: &Config) {
         std::process::exit(1);
     }
     
-    println!("✓ Dotfiles deployed successfully!");
+    println!("✓ Custom dotfiles deployed successfully!");
 }
 
 // Install Nix package manager
@@ -824,11 +874,12 @@ fn main() {
     install_paru(&config);
     setup_chaotic_aur(&config);
     setup_dotfiles(&config);
-    deploy_dotfiles(&config);
+    deploy_dotfiles(&config);           // Just install stow and create dirs
     install_nix(&config);
-    setup_home_manager(&config);
+    setup_home_manager(&config);        // This builds the initial default generation
+    stow_custom_configs(&config);       // NOW we replace with your custom configs
     clone_wallpapers(&config);
-    rebuild_home_manager(&config);
+    rebuild_home_manager(&config);      // Rebuild with your custom configs
     
     if config.dry_run {
         println!("\n=== DRY RUN COMPLETE ===");
