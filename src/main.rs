@@ -173,11 +173,26 @@ fn install_paru(config: &Config) {
     println!("Installing paru...");
     
     if config.dry_run {
-        println!("[DRY RUN] Would execute:");
+        println!("[DRY RUN] Would check if paru is installed, if not:");
         println!("  1. git clone https://aur.archlinux.org/paru.git");
         println!("  2. sudo pacman -Syyu --noconfirm rustup bat devtools");
         println!("  3. rustup default stable");
         println!("  4. cd paru && makepkg -si --noconfirm");
+        return;
+    }
+    
+    // Check if paru is already installed
+    let output = Command::new("which")
+        .arg("paru")
+        .output()
+        .expect("Failed to execute which command");
+    
+    if !output.stdout.is_empty() {
+        if config.verbose {
+            println!("✓ Paru is already installed: {}", String::from_utf8_lossy(&output.stdout).trim());
+        } else {
+            println!("✓ Paru already installed, skipping installation");
+        }
         return;
     }
     
