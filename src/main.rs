@@ -319,6 +319,150 @@ fn deploy_dotfiles(config: &Config) {
     println!("✓ Dotfiles deployed successfully!");
 }
 
+// Install Nix package manager
+fn install_nix(config: &Config) {
+    println!("Installing Nix package manager...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. cd ~");
+        println!("  2. curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install -o nix-install.sh");
+        println!("  3. chmod +x nix-install.sh");
+        println!("  4. sh ./nix-install.sh --daemon");
+        return;
+    }
+    
+    let home = env::var("HOME").expect("HOME environment variable not set");
+    
+    // Download Nix installer
+    if config.verbose {
+        println!("Downloading Nix installer to {}...", home);
+    }
+    let status = Command::new("curl")
+        .args(&[
+            "--proto", "=https",
+            "--tlsv1.2",
+            "-sSfL",
+            "https://nixos.org/nix/install",
+            "-o", "nix-install.sh"
+        ])
+        .current_dir(&home)
+        .status()
+        .expect("Failed to execute curl");
+    
+    if !status.success() {
+        eprintln!("Failed to download Nix installer");
+        std::process::exit(1);
+    }
+    
+    // Make installer executable
+    if config.verbose {
+        println!("Making installer executable...");
+    }
+    let nix_installer_path = format!("{}/nix-install.sh", home);
+    let status = Command::new("chmod")
+        .args(&["+x", &nix_installer_path])
+        .status()
+        .expect("Failed to execute chmod");
+    
+    if !status.success() {
+        eprintln!("Failed to make Nix installer executable");
+        std::process::exit(1);
+    }
+    
+    // Run Nix installer with daemon mode
+    if config.verbose {
+        println!("Running Nix installer (daemon mode)...");
+    }
+    let status = Command::new("sh")
+        .args(&["./nix-install.sh", "--daemon"])
+        .current_dir(&home)
+        .status()
+        .expect("Failed to execute Nix installer");
+    
+    if !status.success() {
+        eprintln!("Failed to install Nix");
+        std::process::exit(1);
+    }
+    
+    println!("✓ Nix installed successfully!");
+}
+// Enable Nix daemon and setup home-manager
+fn setup_home_manager(config: &Config) {
+    println!("Setting up Home Manager...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. sudo systemctl enable --now nix-daemon.service");
+        println!("  2. nix-channel --add https://github.com/nix-community/home-manager/archive/master.tar.gz home-manager");
+        println!("  3. nix-channel --update");
+        println!("  4. nix-shell '<home-manager>' -A install");
+        return;
+    }
+    
+    // Enable and start Nix daemon service
+    if config.verbose {
+        println!("Enabling Nix daemon service...");
+    }
+    let status = Command::new("sudo")
+        .args(&["systemctl", "enable", "--now", "nix-daemon.service"])
+        .status()
+        .expect("Failed to execute systemctl");
+    
+    if !status.success() {
+        eprintln!("Failed to enable Nix daemon service");
+        std::process::exit(1);
+    }
+    
+    // Add home-manager channel
+    if config.verbose {
+        println!("Adding home-manager channel...");
+    }
+    let status = Command::new("nix-channel")
+        .args(&[
+            "--add",
+            "https://github.com/nix-community/home-manager/archive/master.tar.gz",
+            "home-manager"
+        ])
+        .status()
+        .expect("Failed to execute nix-channel add");
+    
+    if !status.success() {
+        eprintln!("Failed to add home-manager channel");
+        std::process::exit(1);
+    }
+    
+    // Update channels
+    if config.verbose {
+        println!("Updating nix channels...");
+    }
+    let status = Command::new("nix-channel")
+        .arg("--update")
+        .status()
+        .expect("Failed to execute nix-channel update");
+    
+    if !status.success() {
+        eprintln!("Failed to update nix channels");
+        std::process::exit(1);
+    }
+    
+    // Install home-manager
+    if config.verbose {
+        println!("Installing home-manager...");
+    }
+    let status = Command::new("nix-shell")
+        .args(&["<home-manager>", "-A", "install"])
+        .status()
+        .expect("Failed to execute nix-shell");
+    
+    if !status.success() {
+        eprintln!("Failed to install home-manager");
+        std::process::exit(1);
+    }
+    
+    println!("✓ Home Manager setup complete!");
+}
+
 fn main() {
     let config = parse_args();
     
@@ -333,6 +477,8 @@ fn main() {
     install_paru(&config);
     setup_dotfiles(&config);
     deploy_dotfiles(&config);
+    install_nix(&config);
+    setup_home_manager(&config);
     
     if config.dry_run {
         println!("\n=== DRY RUN COMPLETE ===");
