@@ -13,7 +13,7 @@ fn print_help() {
     println!("A.S.S. - Automated System Setup");
     println!();
     println!("USAGE:");
-    println!("    a-s-s [OPTIONS]");
+    println!("    ass [OPTIONS]");
     println!();
     println!("OPTIONS:");
     println!("    --help, -h       Show this help message");
@@ -21,9 +21,9 @@ fn print_help() {
     println!("    --verbose, -v    Show detailed output");
     println!();
     println!("EXAMPLES:");
-    println!("    a-s-s                    # Run the setup");
-    println!("    a-s-s --dry-run          # Test without making changes");
-    println!("    a-s-s --verbose          # Run with detailed output");
+    println!("    ass                    # Run the setup");
+    println!("    ass --dry-run          # Test without making changes");
+    println!("    ass --verbose          # Run with detailed output");
 }
 
 fn parse_args() -> Config {
@@ -60,29 +60,81 @@ fn check_deps(config: &Config) {
     }
     
     if config.dry_run {
-        println!("[DRY RUN] Would check for git installation");
+        println!("[DRY RUN] Would check for: git, curl, sudo, systemctl");
         return;
     }
     
+    let mut missing_deps = Vec::new();
+    
+    // Check for git
     let output = Command::new("which")
         .arg("git")
         .output()
         .expect("Failed to execute which command");
     
     if output.stdout.is_empty() {
-        println!("Git not found. Installing git...");
+        missing_deps.push("git");
+    } else if config.verbose {
+        println!("✓ Found git: {}", String::from_utf8_lossy(&output.stdout).trim());
+    }
+    
+    // Check for curl (needed for Nix installer)
+    let output = Command::new("which")
+        .arg("curl")
+        .output()
+        .expect("Failed to execute which command");
+    
+    if output.stdout.is_empty() {
+        missing_deps.push("curl");
+    } else if config.verbose {
+        println!("✓ Found curl: {}", String::from_utf8_lossy(&output.stdout).trim());
+    }
+    
+    // Check for sudo
+    let output = Command::new("which")
+        .arg("sudo")
+        .output()
+        .expect("Failed to execute which command");
+    
+    if output.stdout.is_empty() {
+        eprintln!("ERROR: sudo is required but not found");
+        std::process::exit(1);
+    } else if config.verbose {
+        println!("✓ Found sudo: {}", String::from_utf8_lossy(&output.stdout).trim());
+    }
+    
+    // Check for systemctl (needed for Nix daemon)
+    let output = Command::new("which")
+        .arg("systemctl")
+        .output()
+        .expect("Failed to execute which command");
+    
+    if output.stdout.is_empty() {
+        eprintln!("ERROR: systemctl is required but not found (are you on systemd?)");
+        std::process::exit(1);
+    } else if config.verbose {
+        println!("✓ Found systemctl: {}", String::from_utf8_lossy(&output.stdout).trim());
+    }
+    
+    // Install missing dependencies
+    if !missing_deps.is_empty() {
+        println!("Installing missing dependencies: {}", missing_deps.join(", "));
+        let mut args = vec!["-S", "--noconfirm"];
+        args.extend(missing_deps.iter().map(|s| *s));
+        
         let status = Command::new("sudo")
-            .args(&["pacman", "-S", "--noconfirm", "git"])
+            .arg("pacman")
+            .args(&args)
             .status()
-            .expect("Failed to install git");
+            .expect("Failed to install dependencies");
         
         if !status.success() {
-            eprintln!("Failed to install git");
+            eprintln!("Failed to install dependencies");
             std::process::exit(1);
         }
-        println!("✓ Git installed successfully");
+        println!("✓ Dependencies installed successfully");
     } else if config.verbose {
-        println!("Path to git: {:?}", String::from_utf8_lossy(&output.stdout));
+        println!("✓ All required dependencies are installed");
     }
 }
 
@@ -194,7 +246,7 @@ fn setup_dotfiles(config: &Config) {
     if config.dry_run {
         println!("[DRY RUN] Would execute:");
         println!("  1. cd ~");
-        println!("  2. git clone https://github.com/jeebuscrossaint/dotfiles.git");
+        println!("  2. git clone --depth=1 https://github.com/jeebuscrossaint/dotfiles.git");
         println!("  3. cd dotfiles");
         println!("  4. paru -S --needed - < archpkglist.txt");
         return;
@@ -203,12 +255,12 @@ fn setup_dotfiles(config: &Config) {
     // Get home directory
     let home = env::var("HOME").expect("HOME environment variable not set");
     
-    // Clone dotfiles repo
+    // Clone dotfiles repo with --depth=1
     if config.verbose {
-        println!("Cloning dotfiles repository to {}...", home);
+        println!("Cloning dotfiles repository to {} (shallow clone)...", home);
     }
     let status = Command::new("git")
-        .args(&["clone", "https://github.com/jeebuscrossaint/dotfiles.git"])
+        .args(&["clone", "--depth=1", "https://github.com/jeebuscrossaint/dotfiles.git"])
         .current_dir(&home)
         .status()
         .expect("Failed to execute git clone");
@@ -218,23 +270,23 @@ fn setup_dotfiles(config: &Config) {
         std::process::exit(1);
     }
     
-    // Install packages from pkglist.txt
+    // Install packages from archpkglist.txt
     if config.verbose {
-        println!("Installing packages from pkglist.txt...");
+        println!("Installing packages from archpkglist.txt...");
     }
     
     let dotfiles_path = format!("{}/dotfiles", home);
-    let pkglist_path = format!("{}/pkglist.txt", dotfiles_path);
+    let pkglist_path = format!("{}/archpkglist.txt", dotfiles_path);
     
     let status = Command::new("paru")
         .args(&["-S", "--needed", "-"])
         .current_dir(&dotfiles_path)
-        .stdin(std::fs::File::open(&pkglist_path).expect("Failed to open pkglist.txt"))
+        .stdin(std::fs::File::open(&pkglist_path).expect("Failed to open archpkglist.txt"))
         .status()
         .expect("Failed to execute paru");
     
     if !status.success() {
-        eprintln!("Failed to install packages from pkglist.txt");
+        eprintln!("Failed to install packages from archpkglist.txt");
         std::process::exit(1);
     }
     
@@ -463,6 +515,88 @@ fn setup_home_manager(config: &Config) {
     println!("✓ Home Manager setup complete!");
 }
 
+// Clone wallpaper repositories
+fn clone_wallpapers(config: &Config) {
+    println!("Cloning wallpaper repositories...");
+    
+    let wallpaper_repos = vec![
+        "https://github.com/rann01/IRIX-tiles",
+        "https://github.com/dharmx/walls",
+        "https://github.com/wallace-aph/tiles-and-such",
+        "https://github.com/tile-anon/tiles",
+        "https://github.com/whoisYoges/lwalpapers",
+        "https://github.com/D3Ext/aesthetic-wallpapers",
+        "https://github.com/peteroupc/classic-wallpaper",
+        "https://github.com/dixiedream/wallpapers",
+        "https://github.com/mylinuxforwork/wallpaper",
+        "https://github.com/makccr/wallpapers",
+        "https://github.com/Axenide/Wallpapers",
+        "https://github.com/l3ct3r/wallpapers",
+        "https://github.com/dmighty007/WallPapers",
+        "https://github.com/DenverCoder1/minimalistic-wallpaper-collection",
+        "https://github.com/BitterSweetcandyshop/wallpapers",
+        "https://github.com/linuxdotexe/nordic-wallpapers",
+    ];
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would clone {} wallpaper repositories to ~/ with --depth=1", wallpaper_repos.len());
+        for repo in &wallpaper_repos {
+            println!("  - {}", repo);
+        }
+        return;
+    }
+    
+    let home = env::var("HOME").expect("HOME environment variable not set");
+    
+    for repo in &wallpaper_repos {
+        if config.verbose {
+            println!("Cloning {}...", repo);
+        }
+        
+        let status = Command::new("git")
+            .args(&["clone", "--depth=1", repo])
+            .current_dir(&home)
+            .status()
+            .expect("Failed to execute git clone");
+        
+        if !status.success() {
+            eprintln!("⚠ Warning: Failed to clone {}", repo);
+            // Continue with other repos instead of exiting
+        } else if config.verbose {
+            println!("✓ Cloned {}", repo);
+        }
+    }
+    
+    println!("✓ Wallpaper repositories cloned!");
+}
+
+// Rebuild home-manager configuration
+fn rebuild_home_manager(config: &Config) {
+    println!("Rebuilding Home Manager configuration...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  home-manager switch -b backup");
+        return;
+    }
+    
+    if config.verbose {
+        println!("Running home-manager switch...");
+    }
+    
+    let status = Command::new("home-manager")
+        .args(&["switch", "-b", "backup"])
+        .status()
+        .expect("Failed to execute home-manager");
+    
+    if !status.success() {
+        eprintln!("Failed to rebuild home-manager configuration");
+        std::process::exit(1);
+    }
+    
+    println!("✓ Home Manager configuration rebuilt successfully!");
+}
+
 fn main() {
     let config = parse_args();
     
@@ -479,10 +613,12 @@ fn main() {
     deploy_dotfiles(&config);
     install_nix(&config);
     setup_home_manager(&config);
+    clone_wallpapers(&config);
+    rebuild_home_manager(&config);
     
     if config.dry_run {
         println!("\n=== DRY RUN COMPLETE ===");
     } else {
-        println!("\n✓ Setup complete!");
+        println!("\n✓ Setup complete! Your system is ready to use!");
     }
 }
