@@ -267,7 +267,7 @@ fn setup_dotfiles(config: &Config) {
         println!("  2. cd ~");
         println!("  3. git clone --depth=1 https://github.com/jeebuscrossaint/dotfiles.git");
         println!("  4. cd dotfiles");
-        println!("  5. paru -S --needed --noconfirm --skipreview --batchinstall - < archpkglist.txt");
+        println!("  5. Filter out invalid packages and run paru -S --needed --noconfirm --skipreview --batchinstall");
         return;
     }
     
@@ -306,12 +306,35 @@ fn setup_dotfiles(config: &Config) {
     
     let pkglist_path = format!("{}/archpkglist.txt", dotfiles_path);
     
+    // Read the package list and filter out problematic packages
+    let pkglist_content = std::fs::read_to_string(&pkglist_path)
+        .expect("Failed to read archpkglist.txt");
+    
+    let filtered_packages: Vec<&str> = pkglist_content
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| *line != "paru-debug") // Filter out paru-debug
+        .collect();
+    
+    if config.verbose {
+        println!("Installing {} packages (filtered out invalid packages)", filtered_packages.len());
+    }
+    
+    // Create a temporary filtered package list
+    let temp_pkglist = "/tmp/ass-filtered-pkglist.txt";
+    std::fs::write(temp_pkglist, filtered_packages.join("\n"))
+        .expect("Failed to write temporary package list");
+    
     let status = Command::new("paru")
         .args(&["-S", "--needed", "--noconfirm", "--skipreview", "--batchinstall", "-"])
         .current_dir(&dotfiles_path)
-        .stdin(std::fs::File::open(&pkglist_path).expect("Failed to open archpkglist.txt"))
+        .stdin(std::fs::File::open(temp_pkglist).expect("Failed to open temp package list"))
         .status()
         .expect("Failed to execute paru");
+    
+    // Clean up temp file
+    let _ = std::fs::remove_file(temp_pkglist);
     
     if !status.success() {
         eprintln!("Failed to install packages from archpkglist.txt");
