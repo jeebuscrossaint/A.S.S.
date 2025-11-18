@@ -10,6 +10,7 @@ use std::path::Path;
 struct Config {
     dry_run: bool,
     verbose: bool,
+    skip_wallpapers: bool,
 }
 
 fn print_help() {
@@ -19,14 +20,16 @@ fn print_help() {
     println!("    ass [OPTIONS]");
     println!();
     println!("OPTIONS:");
-    println!("    --help, -h       Show this help message");
-    println!("    --dry-run        Show what would be done without executing");
-    println!("    --verbose, -v    Show detailed output");
+    println!("    --help, -h           Show this help message");
+    println!("    --dry-run            Show what would be done without executing");
+    println!("    --verbose, -v        Show detailed output");
+    println!("    --skip-wallpapers    Skip cloning wallpaper repositories");
     println!();
     println!("EXAMPLES:");
-    println!("    ass                    # Run the setup");
-    println!("    ass --dry-run          # Test without making changes");
-    println!("    ass --verbose          # Run with detailed output");
+    println!("    ass                       # Run the setup");
+    println!("    ass --dry-run             # Test without making changes");
+    println!("    ass --verbose             # Run with detailed output");
+    println!("    ass --skip-wallpapers     # Skip wallpaper downloads");
 }
 
 fn parse_args() -> Config {
@@ -34,6 +37,7 @@ fn parse_args() -> Config {
     let mut config = Config {
         dry_run: false,
         verbose: false,
+        skip_wallpapers: false,
     };
     
     for arg in args.iter().skip(1) {
@@ -44,6 +48,7 @@ fn parse_args() -> Config {
             }
             "--dry-run" => config.dry_run = true,
             "--verbose" | "-v" => config.verbose = true,
+            "--skip-wallpapers" => config.skip_wallpapers = true,
             _ => {
                 eprintln!("Unknown option: {}", arg);
                 eprintln!("Use --help for usage information");
@@ -878,7 +883,13 @@ fn main() {
     install_nix(&config);
     setup_home_manager(&config);        // This builds the initial default generation
     stow_custom_configs(&config);       // NOW we replace with your custom configs
-    clone_wallpapers(&config);
+    
+    if !config.skip_wallpapers {
+        clone_wallpapers(&config);
+    } else {
+        println!("⏭ Skipping wallpaper repositories (--skip-wallpapers)");
+    }
+    
     rebuild_home_manager(&config);      // Rebuild with your custom configs
     
     if config.dry_run {
