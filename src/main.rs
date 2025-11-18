@@ -69,7 +69,19 @@ fn check_deps(config: &Config) {
         .output()
         .expect("Failed to execute which command");
     
-    if config.verbose {
+    if output.stdout.is_empty() {
+        println!("Git not found. Installing git...");
+        let status = Command::new("sudo")
+            .args(&["pacman", "-S", "--noconfirm", "git"])
+            .status()
+            .expect("Failed to install git");
+        
+        if !status.success() {
+            eprintln!("Failed to install git");
+            std::process::exit(1);
+        }
+        println!("✓ Git installed successfully");
+    } else if config.verbose {
         println!("Path to git: {:?}", String::from_utf8_lossy(&output.stdout));
     }
 }
@@ -175,6 +187,138 @@ fn install_paru(config: &Config) {
     println!("✓ Paru installed successfully!");
 }
 
+// Clone dotfiles and install packages
+fn setup_dotfiles(config: &Config) {
+    println!("Setting up dotfiles...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. cd ~");
+        println!("  2. git clone https://github.com/jeebuscrossaint/dotfiles.git");
+        println!("  3. cd dotfiles");
+        println!("  4. paru -S --needed - < archpkglist.txt");
+        return;
+    }
+    
+    // Get home directory
+    let home = env::var("HOME").expect("HOME environment variable not set");
+    
+    // Clone dotfiles repo
+    if config.verbose {
+        println!("Cloning dotfiles repository to {}...", home);
+    }
+    let status = Command::new("git")
+        .args(&["clone", "https://github.com/jeebuscrossaint/dotfiles.git"])
+        .current_dir(&home)
+        .status()
+        .expect("Failed to execute git clone");
+    
+    if !status.success() {
+        eprintln!("Failed to clone dotfiles repository");
+        std::process::exit(1);
+    }
+    
+    // Install packages from pkglist.txt
+    if config.verbose {
+        println!("Installing packages from pkglist.txt...");
+    }
+    
+    let dotfiles_path = format!("{}/dotfiles", home);
+    let pkglist_path = format!("{}/pkglist.txt", dotfiles_path);
+    
+    let status = Command::new("paru")
+        .args(&["-S", "--needed", "-"])
+        .current_dir(&dotfiles_path)
+        .stdin(std::fs::File::open(&pkglist_path).expect("Failed to open pkglist.txt"))
+        .status()
+        .expect("Failed to execute paru");
+    
+    if !status.success() {
+        eprintln!("Failed to install packages from pkglist.txt");
+        std::process::exit(1);
+    }
+    
+    println!("✓ Dotfiles setup complete!");
+}
+
+// Install stow and deploy dotfiles
+fn deploy_dotfiles(config: &Config) {
+    println!("Deploying dotfiles with GNU Stow...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. sudo pacman -S --noconfirm stow");
+        println!("  2. mkdir -p ~/.config");
+        println!("  3. cd ~/dotfiles && stow home-manager");
+        println!("  4. cd ~/dotfiles && stow nix");
+        return;
+    }
+    
+    // Install GNU Stow
+    if config.verbose {
+        println!("Installing GNU Stow...");
+    }
+    let status = Command::new("sudo")
+        .args(&["pacman", "-S", "--noconfirm", "stow"])
+        .status()
+        .expect("Failed to execute pacman");
+    
+    if !status.success() {
+        eprintln!("Failed to install stow");
+        std::process::exit(1);
+    }
+    
+    let home = env::var("HOME").expect("HOME environment variable not set");
+    let config_path = format!("{}/.config", home);
+    let dotfiles_path = format!("{}/dotfiles", home);
+    
+    // Create .config directory
+    if config.verbose {
+        println!("Creating ~/.config directory...");
+    }
+    let status = Command::new("mkdir")
+        .args(&["-p", &config_path])
+        .status()
+        .expect("Failed to create .config directory");
+    
+    if !status.success() {
+        eprintln!("Failed to create .config directory");
+        std::process::exit(1);
+    }
+    
+    // Stow home-manager
+    if config.verbose {
+        println!("Stowing home-manager...");
+    }
+    let status = Command::new("stow")
+        .arg("home-manager")
+        .current_dir(&dotfiles_path)
+        .status()
+        .expect("Failed to stow home-manager");
+    
+    if !status.success() {
+        eprintln!("Failed to stow home-manager");
+        std::process::exit(1);
+    }
+    
+    // Stow nix
+    if config.verbose {
+        println!("Stowing nix...");
+    }
+    let status = Command::new("stow")
+        .arg("nix")
+        .current_dir(&dotfiles_path)
+        .status()
+        .expect("Failed to stow nix");
+    
+    if !status.success() {
+        eprintln!("Failed to stow nix");
+        std::process::exit(1);
+    }
+    
+    println!("✓ Dotfiles deployed successfully!");
+}
+
 fn main() {
     let config = parse_args();
     
@@ -187,6 +331,8 @@ fn main() {
     check_deps(&config);
     check_connection(&config);
     install_paru(&config);
+    setup_dotfiles(&config);
+    deploy_dotfiles(&config);
     
     if config.dry_run {
         println!("\n=== DRY RUN COMPLETE ===");
