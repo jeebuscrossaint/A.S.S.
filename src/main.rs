@@ -1,16 +1,28 @@
 use std::process::Command;
-use std::io::{self, Write};
-use std::time::Duration;
-use std::thread;
+use std::io::Write;
 use std::env;
 use std::fs::OpenOptions;
-use std::io::prelude::*;
 use std::path::Path;
 
 struct Config {
     dry_run: bool,
     verbose: bool,
     skip_wallpapers: bool,
+}
+
+// State file to track installation progress
+const STATE_FILE: &str = "/tmp/ass-install-state";
+
+fn get_install_state() -> String {
+    std::fs::read_to_string(STATE_FILE).unwrap_or_else(|_| "start".to_string())
+}
+
+fn set_install_state(state: &str) {
+    std::fs::write(STATE_FILE, state).expect("Failed to write state file");
+}
+
+fn clear_install_state() {
+    let _ = std::fs::remove_file(STATE_FILE);
 }
 
 fn print_help() {
@@ -143,34 +155,6 @@ fn check_deps(config: &Config) {
         println!("✓ Dependencies installed successfully");
     } else if config.verbose {
         println!("✓ All required dependencies are installed");
-    }
-}
-
-// just wait 3 seconds and prompt user
-fn check_connection(config: &Config) {
-    if config.verbose {
-        println!("Checking network connection...");
-    }
-    
-    if config.dry_run {
-        println!("[DRY RUN] Would wait 3 seconds and prompt for connection");
-        return;
-    }
-    
-    println!("Checking network connection...");
-    thread::sleep(Duration::from_secs(3));
-    
-    println!("⚠ Could not verify connection (timeout after 3s)");
-    print!("Continue anyway? [Y/n]: ");
-    io::stdout().flush().unwrap();
-    
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let input = input.trim().to_lowercase();
-    
-    if input == "n" || input == "no" {
-        println!("Aborted.");
-        std::process::exit(0);
     }
 }
 
@@ -488,6 +472,7 @@ fn install_nix(config: &Config) {
         println!("  3. curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install -o nix-install.sh");
         println!("  4. chmod +x nix-install.sh");
         println!("  5. sh ./nix-install.sh --daemon");
+        println!("  6. Prompt user to log out and log back in");
         return;
     }
     
@@ -560,7 +545,28 @@ fn install_nix(config: &Config) {
     }
     
     println!("✓ Nix installed successfully!");
+    println!();
+    println!("╔════════════════════════════════════════════════════════════╗");
+    println!("║  ⚠️  ACTION REQUIRED                                        ║");
+    println!("║                                                            ║");
+    println!("║  Nix has been installed successfully!                      ║");
+    println!("║                                                            ║");
+    println!("║  You MUST log out and log back in for the changes to      ║");
+    println!("║  take effect before continuing the installation.          ║");
+    println!("║                                                            ║");
+    println!("║  After logging back in, run this script again:            ║");
+    println!("║  $ ./ass                                                   ║");
+    println!("║                                                            ║");
+    println!("║  The installation will automatically resume from where    ║");
+    println!("║  it left off.                                              ║");
+    println!("╔════════════════════════════════════════════════════════════╗");
+    println!();
+    
+    // Set state to resume after nix installation
+    set_install_state("post-nix");
+    std::process::exit(0);
 }
+
 // Enable Nix daemon and setup home-manager
 fn setup_home_manager(config: &Config) {
     println!("Setting up Home Manager...");
@@ -875,26 +881,45 @@ fn main() {
     }
     
     println!("A.S.S. - Arch Setup Script");
-    check_deps(&config);
-    install_paru(&config);
-    setup_chaotic_aur(&config);
-    setup_dotfiles(&config);
-    deploy_dotfiles(&config);           // Just install stow and create dirs
-    install_nix(&config);
-    setup_home_manager(&config);        // This builds the initial default generation
-    stow_custom_configs(&config);       // NOW we replace with your custom configs
     
-    if !config.skip_wallpapers {
-        clone_wallpapers(&config);
-    } else {
-        println!("⏭ Skipping wallpaper repositories (--skip-wallpapers)");
-    }
+    let state = get_install_state();
     
-    rebuild_home_manager(&config);      // Rebuild with your custom configs
-    
-    if config.dry_run {
-        println!("\n=== DRY RUN COMPLETE ===");
-    } else {
-        println!("\n✓ Setup complete! Your system is ready to use!");
+    match state.trim() {
+        "start" => {
+            check_deps(&config);
+            install_paru(&config);
+            setup_chaotic_aur(&config);
+            setup_dotfiles(&config);
+            deploy_dotfiles(&config);
+            install_nix(&config);
+            // Program exits here after nix installation
+        }
+        "post-nix" => {
+            println!("⏩ Resuming installation after Nix setup...\n");
+            setup_home_manager(&config);
+            stow_custom_configs(&config);
+            
+            if !config.skip_wallpapers {
+                clone_wallpapers(&config);
+            } else {
+                println!("⏭ Skipping wallpaper repositories (--skip-wallpapers)");
+            }
+            
+            rebuild_home_manager(&config);
+            
+            // Clear state file on successful completion
+            clear_install_state();
+            
+            if config.dry_run {
+                println!("\n=== DRY RUN COMPLETE ===");
+            } else {
+                println!("\n✓ Setup complete! Your system is ready to use!");
+            }
+        }
+        _ => {
+            eprintln!("Unknown installation state: {}", state);
+            eprintln!("To start fresh, run: rm /tmp/ass-install-state");
+            std::process::exit(1);
+        }
     }
 }
