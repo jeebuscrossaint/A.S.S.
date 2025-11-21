@@ -872,6 +872,123 @@ fn setup_chaotic_aur(config: &Config) {
     println!("✓ Chaotic AUR setup complete!");
 }
 
+// Configure pacman.conf with performance optimizations
+fn configure_pacman(config: &Config) {
+    println!("Configuring pacman.conf...");
+    
+    if config.dry_run {
+        println!("[DRY RUN] Would execute:");
+        println!("  1. Uncomment 'Color' in /etc/pacman.conf");
+        println!("  2. Comment out 'NoProgressBar' in /etc/pacman.conf");
+        println!("  3. Set 'ParallelDownloads = 25' in /etc/pacman.conf");
+        println!("  4. Add 'ILoveCandy' to /etc/pacman.conf");
+        return;
+    }
+    
+    // Read pacman.conf
+    let pacman_conf_content = std::fs::read_to_string("/etc/pacman.conf")
+        .expect("Failed to read /etc/pacman.conf");
+    
+    let mut modified_content = String::new();
+    let mut in_options_section = false;
+    let mut ilovecandy_added = false;
+    
+    for line in pacman_conf_content.lines() {
+        // Detect [options] section
+        if line.trim() == "[options]" {
+            in_options_section = true;
+            modified_content.push_str(line);
+            modified_content.push('\n');
+            continue;
+        }
+        
+        // Detect end of [options] section
+        if in_options_section && line.trim().starts_with('[') && line.trim() != "[options]" {
+            // Add ILoveCandy before leaving options section if not already added
+            if !ilovecandy_added {
+                modified_content.push_str("ILoveCandy\n");
+                ilovecandy_added = true;
+            }
+            in_options_section = false;
+        }
+        
+        if in_options_section {
+            // Uncomment Color
+            if line.trim() == "#Color" {
+                modified_content.push_str("Color\n");
+                if config.verbose {
+                    println!("  ✓ Enabled Color");
+                }
+                continue;
+            }
+            
+            // Keep Color if already uncommented
+            if line.trim() == "Color" {
+                modified_content.push_str(line);
+                modified_content.push('\n');
+                continue;
+            }
+            
+            // Comment out NoProgressBar if it's uncommented
+            if line.trim() == "NoProgressBar" {
+                modified_content.push_str("#NoProgressBar\n");
+                if config.verbose {
+                    println!("  ✓ Disabled NoProgressBar");
+                }
+                continue;
+            }
+            
+            // Keep NoProgressBar if already commented
+            if line.trim() == "#NoProgressBar" {
+                modified_content.push_str(line);
+                modified_content.push('\n');
+                continue;
+            }
+            
+            // Update ParallelDownloads
+            if line.trim().starts_with("ParallelDownloads") || line.trim().starts_with("#ParallelDownloads") {
+                modified_content.push_str("ParallelDownloads = 25\n");
+                if config.verbose {
+                    println!("  ✓ Set ParallelDownloads = 25");
+                }
+                continue;
+            }
+            
+            // Skip ILoveCandy if it already exists
+            if line.trim() == "ILoveCandy" {
+                ilovecandy_added = true;
+                modified_content.push_str(line);
+                modified_content.push('\n');
+                continue;
+            }
+        }
+        
+        modified_content.push_str(line);
+        modified_content.push('\n');
+    }
+    
+    // Write to temporary file
+    let temp_file = "/tmp/ass-pacman.conf";
+    std::fs::write(temp_file, modified_content)
+        .expect("Failed to write temporary pacman.conf");
+    
+    // Copy to /etc/pacman.conf using sudo
+    let status = Command::new("sudo")
+        .args(&["cp", temp_file, "/etc/pacman.conf"])
+        .status()
+        .expect("Failed to copy pacman.conf");
+    
+    if !status.success() {
+        eprintln!("Failed to update /etc/pacman.conf");
+        std::process::exit(1);
+    }
+    
+    // Clean up temp file
+    let _ = std::fs::remove_file(temp_file);
+    
+    println!("✓ Pacman.conf configured successfully!");
+}
+
 fn main() {
     let config = parse_args();
     
@@ -887,6 +1004,7 @@ fn main() {
     match state.trim() {
         "start" => {
             check_deps(&config);
+            configure_pacman(&config);  // Configure pacman before installing anything
             install_paru(&config);
             setup_chaotic_aur(&config);
             setup_dotfiles(&config);
